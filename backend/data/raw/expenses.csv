@@ -1,0 +1,8 @@
+expense_id,date,category,amount
+1,2025-09-01,Raw Materials,120000
+2,2025-09-01,Transport,40000
+3,2025-09-15,Salaries,180000
+4,2025-10-01,Utilities,60000
+5,2025-10-20,Marketing,90000
+6,2025-11-01,Salaries,180000
+7,2025-12-01,Rent,150000
