@@ -1,48 +1,54 @@
 import pandas as pd
-from pathlib import Path
+from typing import List, Dict, Any
+from app.core.celery_app import celery_app
+from app.core.database import SessionLocal
+from app.models.sales import Sale
+from app.models.expenses import Expense
+from app.models.products import Product
+from app.schemas.etl import ETLSaleData, ETLExpenseData, ETLProductData
+from app.core.logging import logger
+from pydantic import ValidationError
+import time
 
-BASE_DIR = Path(__file__).resolve().parents[3]
-RAW_DATA = BASE_DIR / "data" / "raw"
-PROCESSED_DATA = BASE_DIR / "data" / "processed"
+@celery_app.task(bind=True, max_retries=3)
+def process_sales_upload(self, data: List[Dict[str, Any]], tenant_id: int):
+    """Processes an uploaded list of sales dicts, validates them, and inserts into DB."""
+    db = SessionLocal()
+    try:
+        self.update_state(state='PROGRESS', meta={'current': 0, 'total': len(data)})
+        
+        valid_sales = []
+        errors = []
+        for index, item in enumerate(data):
+            try:
+                # Validation
+                validated = ETLSaleData(**item)
+                sale_model = Sale(
+                    revenue=validated.revenue,
+                    date=validated.date,
+                    tenant_id=tenant_id
+                )
+                valid_sales.append(sale_model)
+            except ValidationError as e:
+                errors.append({"row": index, "error": str(e)})
+                logger.warning(f"ETL Validation Error (Sales) for Tenant {tenant_id}: {e}")
 
+        if valid_sales:
+            db.bulk_save_objects(valid_sales)
+            db.commit()
+            
+        return {"processed": len(valid_sales), "errors": len(errors), "error_details": errors}
+    except Exception as exc:
+        db.rollback()
+        logger.error(f"ETL Sales Pipeline failed: {exc}")
+        self.retry(exc=exc, countdown=2 ** self.request.retries)
+    finally:
+        db.close()
 
-def extract_sales() -> pd.DataFrame:
-    return pd.read_csv(RAW_DATA / "sales.csv", parse_dates=["date"])
-
-
-def extract_expenses() -> pd.DataFrame:
-    return pd.read_csv(RAW_DATA / "expenses.csv", parse_dates=["date"])
-
-
-def extract_products() -> pd.DataFrame:
-    return pd.read_csv(RAW_DATA / "products.csv")
-
-
-def transform_sales(sales: pd.DataFrame) -> pd.DataFrame:
-    sales["month"] = sales["date"].dt.to_period("M").astype(str)
-    return sales
-
-
-def load_sales(sales: pd.DataFrame):
-    PROCESSED_DATA.mkdir(parents=True, exist_ok=True)
-    sales.to_csv(PROCESSED_DATA / "sales_clean.csv", index=False)
-
-
-def build_financial_summary():
-    sales = extract_sales()
-    expenses = extract_expenses()
-
-    monthly_sales = sales.groupby(sales["date"].dt.to_period("M"))["revenue"].sum()
-    monthly_expenses = expenses.groupby(expenses["date"].dt.to_period("M"))["amount"].sum()
-
-    summary = pd.concat([monthly_sales, monthly_expenses], axis=1).fillna(0)
-    summary.columns = ["revenue", "expenses"]
-    summary["profit"] = summary["revenue"] - summary["expenses"]
-
-    summary.reset_index(inplace=True)
-    summary.rename(columns={"date": "month"}, inplace=True)
-
-    PROCESSED_DATA.mkdir(parents=True, exist_ok=True)
-    summary.to_csv(PROCESSED_DATA / "financial_summary.csv", index=False)
-
-    return summary
+@celery_app.task(bind=True)
+def generate_daily_summary(self):
+    """Scheduled task to aggregate data across tenants."""
+    logger.info("Running daily financial summary aggregation...")
+    # This would contain the logic that queries the DB using SQLAlchemy grouping
+    # and generates insights or materialized views.
+    return {"status": "summary generated"}

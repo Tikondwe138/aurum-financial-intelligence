@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, Float, String
-from app.core.database import Base
+from app.models.base import Base, TimestampMixin, TenantMixin
 
-class Expense(Base):
+class Expense(Base, TimestampMixin, TenantMixin):
     __tablename__ = "expenses"
 
     id = Column(Integer, primary_key=True, index=True)
