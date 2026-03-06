@@ -6,9 +6,9 @@ services:
     container_name: aurum_postgres
     restart: always
     environment:
-      POSTGRES_USER: aurum_user
-      POSTGRES_PASSWORD: aurum_pass
-      POSTGRES_DB: aurum_db
+      POSTGRES_USER: ${POSTGRES_USER:-aurum_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aurum_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-aurum_db}
     ports:
       - "5432:5432"
     volumes:
@@ -24,18 +24,19 @@ services:
       - redis_data:/data
 
   backend:
-    build: 
+    build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: aurum_backend
     restart: always
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     volumes:
       - ./backend:/app
     ports:
       - "8000:8000"
-    env_file:
-      - ./backend/.env
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-aurum_user}:${POSTGRES_PASSWORD:-aurum_pass}@db:5432/${POSTGRES_DB:-aurum_db}
+      - REDIS_URL=redis://redis:6379/0
     depends_on:
       - db
       - redis
@@ -46,28 +47,25 @@ services:
       dockerfile: Dockerfile
     container_name: aurum_celery_worker
     restart: always
-    # Note: Requires initializing a celery app in app/core/celery.py
     command: celery -A app.core.celery_app worker --loglevel=info
-    volumes:
-      - ./backend:/app
-    env_file:
-      - ./backend/.env
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-aurum_user}:${POSTGRES_PASSWORD:-aurum_pass}@db:5432/${POSTGRES_DB:-aurum_db}
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+      - backend
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: aurum_frontend
+    restart: always
+    ports:
+      - "3000:80"
     depends_on:
       - backend
-      - redis
-      - db
-
-  # Optional frontend service
-  # frontend:
-  #   build:
-  #     context: ./frontend
-  #     dockerfile: Dockerfile
-  #   container_name: aurum_frontend
-  #   restart: always
-  #   ports:
-  #     - "3000:80"
-  #   depends_on:
-  #     - backend
 
 volumes:
   postgres_data:
